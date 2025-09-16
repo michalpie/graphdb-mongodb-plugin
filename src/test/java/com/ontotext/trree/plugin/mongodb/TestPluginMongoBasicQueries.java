@@ -616,6 +616,34 @@ public class TestPluginMongoBasicQueries extends AbstractMongoBasicTest {
 		return false;
 	}
 
+	@Test
+	public void shouldRedirectToCustomGraphLeavingOriginalEmpty() throws Exception {
+		// This test validates the fix for the mongodb:graph directive bug.
+		// When using mongodb:graph to redirect results to a custom graph,
+		// those results should NOT appear in the original collection graph.
+		// This mirrors the user's original issue where ?st2 should be empty.
+		
+		query = "PREFIX : <http://www.ontotext.com/connectors/mongodb#> "
+						+ "PREFIX inst: <http://www.ontotext.com/connectors/mongodb/instance#> "
+						+ "SELECT ?st ?st_program ?st2 ?st_program2 WHERE { "
+						+ "  ?search a inst:spb100 ; "
+						+ "  :find \"{'@id' : 'bbcc:1646453#id'}\" ; "
+						+ "  :graph inst:spb1001 ; "
+						+ "  :entity ?entity . "
+						+ "  GRAPH inst:spb1001 { "
+						+ "    ?st <http://www.bbc.co.uk/ontologies/creativework/about> ?st_program "
+						+ "  } "
+						+ "  OPTIONAL { "
+						+ "    GRAPH inst:spb100 { "
+						+ "      ?st2 <http://www.bbc.co.uk/ontologies/creativework/about> ?st_program2 "
+						+ "    } "
+						+ "    FILTER(?st2 = <bbcc:1646453#id>) "
+						+ "  } "
+						+ "}";
+
+		verifyUnorderedResult();
+	}
+
 	@Override
 	protected RepositoryConfig createRepositoryConfiguration() {
 		return StandardUtils.createOwlimSe("empty");

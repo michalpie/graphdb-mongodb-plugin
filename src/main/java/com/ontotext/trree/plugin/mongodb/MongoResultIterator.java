@@ -564,6 +564,8 @@ public class MongoResultIterator extends StatementIterator {
 					if (this.object == 0) {
 						this.object = entities.put(st.getObject(), Scope.REQUEST);
 					}
+					// Set the context to the iterator's graph ID to respect mongodb:graph directive
+					this.context = MongoResultIterator.this.graphId;
 				}
 				return has;
 			}
