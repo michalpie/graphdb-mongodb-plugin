@@ -7,8 +7,14 @@
 		</encoder>
 	</appender>
 
-	<root level="WARN">
+	<!-- Temporarily elevate root level to DEBUG to capture detailed plugin diagnostics during test runs -->
+	<root level="DEBUG">
 		<appender-ref ref="CONSOLE"/>
 	</root>
+
+	<!-- Enable debug for MongoDBPlugin to trace query variable binding order -->
+	<logger name="com.ontotext.trree.plugin.mongodb.MongoDBPlugin" level="DEBUG" additivity="false">
+		<appender-ref ref="CONSOLE"/>
+	</logger>
 
 </configuration>

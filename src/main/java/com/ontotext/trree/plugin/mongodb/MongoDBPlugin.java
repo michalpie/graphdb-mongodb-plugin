@@ -176,43 +176,51 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 							 RequestContext requestContext) {
 
 		ContextImpl ctx = (requestContext instanceof ContextImpl) ? (ContextImpl) requestContext : null;
-		if (predicate == rdf_type) {
-			if (ctx != null && ctx.iters != null && object != 0 && object != Entities.BOUND) {
-				String suffix = Utils.matchPrefix(
-								pluginConnection.getEntities().get(object).stringValue(), NAMESPACE_INST);
-				if (suffix != null && suffix.length() > 0) {
-					return 0.3;
+		// Heuristics to ensure SPARQL BIND / function evaluation happens before Mongo plugin patterns
+		// when the :find query value is constructed via chained BIND(REPLACE(...)). 
+		// We bias costs so that:
+		// 1. rdf:type (which creates the main iterator) still executes early, but if we already created
+		//    an iterator whose query isn't bound we give it a moderately higher cost so BINDs run first.
+		// 2. :find pattern with unbound object (object==0) gets even higher cost so it is visited only
+		//    after the BIND chain produces the literal (then object != 0 and normal cost applies).
+		// New heuristic: force any non-BIND pattern from this plugin to appear AFTER BIND
+		// by making their estimated cost slightly above typical BIND cost (~1.0).
+		// Using a low base (1.2) preserves planner behavior without exploding overall complexity.
+		double base = 1.2; // anything >1 ensures BIND patterns are chosen first
+		if (predicate == rdf_type) return base + 0.01;
+		if (predicate == queryId) {
+			// If still unbound (object==0) return very high number to push it even further; ideally
+			// this should not happen once heuristics take effect, but safe-guard anyway.
+			return (object == 0 ? base + 10 : base + 0.02);
+		}
+		if (predicate == projectionId) return base + 0.03;
+		if (predicate == aggregationId) return base + 0.04;
+		if (predicate == hintId) return base + 0.05;
+		if (predicate == collationId) return base + 0.06;
+		if (predicate == batchSize) return base + 0.07;
+		if (predicate == entityId) {
+			// If iterator exists but its query not yet set, push entity pattern later to allow :find binding
+			if (ctx != null && ctx.iters != null) {
+				for (MongoResultIterator it : ctx.iters) {
+					if (!it.isQuerySet()) {
+						// High defer cost ensures :find / :aggregate sets query before :entity is scheduled (fixes BIND + batching zero-results)
+						return base + 20.0;
+					}
 				}
 			}
+			return base + 0.08;
 		}
 		if (predicate == graphId) {
-			return 0.35;
+			// Keep graph pattern cost below model pattern cost so that redirection is applied
+			// before any model triples are emitted, ensuring isolation (no leakage into original graph).
+			return base + 0.09;
 		}
-		if (predicate == batchSize) {
-			return 0.37;
-		}
-		if (predicate == aggregationId) {
-			return 0.39;
-		}
-		if (predicate == queryId) {
-			return 0.43;
-		}
-		if (predicate == collationId) {
-			return 0.45;
-		}
-		if (predicate == projectionId) {
-			return 0.46;
-		}
-		if (predicate == hintId) {
-			return 0.49;
-		}
-		if (predicate == entityId) {
-			return 0.52;
-		}
-		if (ctx != null && ctx.iters != null && ctx.getContexts().contains(context)) {
-			return 0.6;
-		}
-		return 0;
+		// model patterns inside a known context
+		if (ctx != null && ctx.iters != null && ctx.getContexts().contains(context)) return base + 0.10;
+		// Default (likely model pattern outside known context yet). We still want these to
+		// execute AFTER the :graph predicate so that any redirection has already been
+		// applied to the iterator. Give them a slightly higher cost than graph.
+		return base + 0.11; // model pattern default cost (ensures graph processed first)
 	}
 
 	@Override
@@ -241,6 +249,19 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 				}
 			}
 		}
+		// // Validate unknown predicate usage in our namespaces (root or instance) when pattern has no explicit context.
+		// if (predicate != 0 && context == 0) {
+		// 	Value val = entities.get(predicate);
+		// 	if (val instanceof IRI iri) {
+		// 		String ns = iri.getNamespace();
+		// 		// Only validate core plugin namespace (not instance data namespace which is for RDF types)
+		// 		if (NAMESPACE.equals(ns)) {
+		// 			if (Arrays.binarySearch(predicateSet, predicate) < 0) {
+		// 				throw new PluginException("Found unrecognized predicate in the MongoDB namespace: " + iri.stringValue());
+		// 			}
+		// 		}
+		// 	}
+		// }
 		if (ctx.entities == null) {
 			ctx.entities = entities;
 		}
@@ -288,6 +309,8 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 			ctx.setPhase(ContextPhase.SEARCH_DEFINITION);
 			ctx.addContext(object);
 			MongoResultIterator mainIterator = createMainIterator(config, ctx, object, 0);
+			// mark that we expect a query (:find or :aggregate) for this iterator; allows deferred binding
+			mainIterator.setQueryExpected();
 
 			// check if we have lazy iterator that was just materialized by the newly created
 			// main iterator. If so then we must return the lazy iterator here instead of the main one
@@ -348,14 +371,21 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 			return resultIterator.singletonIterator(queryId, object);
 		}
 		if (predicate == queryId) {
-			String queryString = Utils.getString(entities, object);
-
 			if (ctx.iters == null) {
 				getLogger().error("iter not created yet");
 				return StatementIterator.EMPTY;
 			}
-
 			MongoResultIterator iter = getIterator(subject, context, ctx);
+			// Mark that a query is expected for this iterator (even if value not yet bound via BIND)
+			// so later :entity does not treat it as entirely missing.
+			iter.setQueryExpected();
+			String queryString = (object == 0) ? null : Utils.getString(entities, object);
+			if (queryString == null) {
+				// With the revised cost model this should rarely happen. Log once to aid debugging and
+				// return EMPTY to allow planner to attempt later (will have higher cost anyway).
+				getLogger().debug("[warn][:find] visited before BIND produced literal; skipping this pass.");
+				return StatementIterator.EMPTY;
+			}
 			iter.setQuery(queryString);
 			return iter.singletonIterator(queryId, object);
 		}
@@ -382,6 +412,7 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 				// make sure to mark the aggregate parameter as lazy set
 				// this will ensure the main iterator would not be closed before setting this.
 				MongoResultIterator iter = getIterator(subject, context, ctx);
+				iter.setQueryExpected();
 				iter.setAggregation(null);
 				return iter.singletonIterator(aggregationId, object);
 			}
@@ -434,11 +465,15 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 		}
 		if (predicate == entityId) {
 			if (ctx.iters == null) {
-				getLogger().error("iter not created yet");
-				return StatementIterator.EMPTY;
+				// No iterator was created (no :find / :aggregate processed). Explicitly fail fast
+				// to preserve historical contract for missing query configuration.
+				throw new PluginException("There is no search query for Mongo");
 			}
 
 			MongoResultIterator iter = getIterator(subject, context, ctx);
+			if (!iter.isQuerySet() && !iter.isQueryExpected()) {
+				throw new PluginException("There is no search query for Mongo");
+			}
 			return iter.createEntityIter(entityId);
 		}
 

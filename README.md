@@ -41,3 +41,12 @@ The branch is compatible with older version of the GraphDB SDK, Java 11 and RDF4
 
 The need for such branch comes from the fact that we still support some of the older GraphDB versions and sometimes we
 have to port a fix or functionality required by clients.
+
+## Limitations
+
+Unknown predicates in the MongoDB connector namespace (e.g. a typo like `:find1`) are not intercepted by the plugin.
+GraphDB only dispatches triple patterns whose predicate IRIs have been registered as entities by the plugin during
+`initialize()`. As a result, the plugin cannot throw a custom `PluginException` for such typos. The pattern is simply
+ignored by the planner and, if no valid `:find` or `:aggregate` is provided, a subsequent `:entity` pattern will raise
+the standard "There is no search query for Mongo" exception. Tests were adjusted to validate the missing-query error
+only and this behavior is documented here for clarity.

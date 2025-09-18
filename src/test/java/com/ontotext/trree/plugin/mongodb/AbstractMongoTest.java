@@ -4,8 +4,7 @@ import com.ontotext.test.functional.base.SingleRepositoryFunctionalTest;
 import de.flapdoodle.embed.mongo.MongodExecutable;
 import de.flapdoodle.embed.mongo.MongodProcess;
 import de.flapdoodle.embed.mongo.MongodStarter;
-import de.flapdoodle.embed.mongo.config.IMongodConfig;
-import de.flapdoodle.embed.mongo.config.MongodConfigBuilder;
+import de.flapdoodle.embed.mongo.config.MongodConfig;
 import de.flapdoodle.embed.mongo.config.Net;
 import de.flapdoodle.embed.mongo.distribution.Version;
 import de.flapdoodle.embed.process.runtime.Network;
@@ -34,15 +33,15 @@ public abstract class AbstractMongoTest extends SingleRepositoryFunctionalTest {
 	}
 
 	protected static MongodProcess startMongod() {
-		IMongodConfig mongoConfigConfig;
 		MongodProcess mongod = null;
 		try {
-			mongoConfigConfig = new MongodConfigBuilder()
-					.version(Version.V3_5_5)
-					.net(new Net(Network.getFreeServerPort(), Network.localhostIsIPv6()))
+			int port = Network.getFreeServerPort();
+			MongodConfig mongoConfig = MongodConfig.builder()
+					.version(Version.Main.V4_4) // updated to a version with native macOS ARM builds
+					.net(new Net(port, Network.localhostIsIPv6()))
 					.build();
 
-			MongodExecutable mongodExecutable = MongodStarter.getDefaultInstance().prepare(mongoConfigConfig);
+			MongodExecutable mongodExecutable = MongodStarter.getDefaultInstance().prepare(mongoConfig);
 			mongod = mongodExecutable.start();
 		} catch (IOException e) {
 			e.printStackTrace();

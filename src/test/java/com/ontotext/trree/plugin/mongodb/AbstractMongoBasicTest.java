@@ -26,6 +26,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Arrays;
+import java.util.Comparator;
 import org.bson.BsonArray;
 import org.bson.BsonValue;
 import org.bson.Document;
@@ -264,7 +266,16 @@ public abstract class AbstractMongoBasicTest extends AbstractMongoTest {
 	protected void loadFilesToMongo(File inputFolder) {
 		List<Document> batch = new LinkedList<>();
 
-		for (File file : inputFolder.listFiles()) {
+		File[] files = inputFolder.listFiles();
+		if (files == null) {
+			return; // nothing to load
+		}
+
+		// Sort the files by name prior to parsing and inserting them into MongoDB to
+		// guarantee a stable insertion and stable test outcome.
+		Arrays.sort(files, Comparator.comparing(File::getName));
+
+		for (File file : files) {
 			if (file.isDirectory()) {
 				continue;
 			}

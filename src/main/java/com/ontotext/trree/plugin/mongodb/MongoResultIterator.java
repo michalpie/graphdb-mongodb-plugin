@@ -74,6 +74,14 @@ public class MongoResultIterator extends StatementIterator {
 	private boolean modelIteratorCreated = false;
 	protected boolean interrupted = false;
 	private boolean closed = false;
+	// Indicates that a :find or :aggregate predicate has been seen for this iterator, even if the
+	// actual query/aggregation value is not yet bound (e.g. supplied later via BIND). Used to
+	// distinguish between "query not yet bound" (defer) and "query never supplied" (error when
+	// :entity is evaluated).
+	private boolean queryExpected = false;
+
+	public void setQueryExpected() { this.queryExpected = true; }
+	public boolean isQueryExpected() { return queryExpected; }
 	// if some of the query components are constructed with a function
 	// and set using bind the first time they are visited will be null. If we have setter with null
 	// then we can expect the value to be set later on, but the original iterator would be closed
@@ -81,11 +89,19 @@ public class MongoResultIterator extends StatementIterator {
 	// set components are null (query, hint, projection, collation, aggregation)
 	private boolean closeable = true;
 
+	// Flag indicating an initialization attempt was deferred because query/aggregation not yet bound
+	private boolean pendingInitialization = false;
+
 	private boolean batched = false;
 	private boolean batchedLoading = false;
 	private int documentsLimit;
 	private BatchDocumentStore batchDocumentStore;
 	private LongIterator storeIterator;
+
+	// Note: Previous deferred model priming / wrapper logic removed. Model iterator
+	// creation is now always eager; late query binding is handled at :find pattern
+	// level (see FindBindingIterator in MongoDBPlugin) which triggers initialization
+	// once the query literal is available.
 
   static {
 		GraphDBJSONLD11ParserFactory jsonldFactory = new GraphDBJSONLD11ParserFactory();
@@ -107,33 +123,33 @@ public class MongoResultIterator extends StatementIterator {
 		jsonLdParserConfig.set(GraphDBJSONLDSettings.DOCUMENT_LOADER, documentLoader);
 	}
 
+	// Indicates we have emitted the initial binding row for the search subject
+	private boolean initialBindingEmitted = false;
+
 	@Override
 	public boolean next() {
-		boolean ret = false;
-		if (!initialized) {
+		if (!initialBindingEmitted) {
+			// Provide the search subject binding to the engine; actual Mongo initialization
+			// will occur lazily when model/entity iterators are consumed.
 			subject = searchSubject;
-			// we cannot call initialize here as this method is called before actual query parameters are set
-			// in order to populate the binding values in the queries
-			ret = true;
-			initialized = true;
+			initialBindingEmitted = true;
+			return true;
 		} else if (initializedByEntityIterator && !searchDone) {
-			// the the graph pattern is located before the search query
-			// the entity iterator will perform the search and return the results, but this iterator
-			// must also return true at least once to tell the engine to read the query variables itself
-			// otherwise they will be left unbound and nothing will be returned as result
-			// so with this here we return true once when the connector is initialized via the entity iterator
+			// Graph pattern appeared before the search, entity iterator performed the search.
 			subject = searchSubject;
 			searchDone = true;
-			ret = true;
+			return true;
 		}
-
-		return ret;
+		return false;
 	}
 
 	protected boolean initialize() {
-		if (query == null && aggregation == null)
-			throw new PluginException("There is no search query for Mongo. Please use either of the predicates: " +
-					Arrays.asList(MongoDBPlugin.QUERY.toString(), MongoDBPlugin.AGGREGATION.toString()));
+		// Defer if neither query nor aggregation has been provided yet. This allows patterns
+		// (e.g. entity/model) that appear before :find/:aggregate to keep the branch alive.
+		if (query == null && aggregation == null) {
+			pendingInitialization = true;
+			return false; // defer initialization
+		}
 
 		try {
 			if (client != null) {
@@ -232,6 +248,9 @@ public class MongoResultIterator extends StatementIterator {
 	public void setQuery(String query) {
 		this.query = query;
 		closeable &= query != null;
+		if (pendingInitialization && !initialized && query != null) {
+			initialize();
+		}
 	}
 
 	public StatementIterator singletonIterator(long predicate, long object) {
@@ -251,7 +270,17 @@ public class MongoResultIterator extends StatementIterator {
 			@Override
 			public boolean next() {
 				if (!initializedE) {
-					initialize();
+					if (!isQuerySet()) {
+						// If a query/aggregation was never even declared for this iterator, raise the original
+						// contract error. Otherwise (query expected but not yet bound) just defer.
+						if (!isQueryExpected()) {
+							throw new PluginException("There is no search query for Mongo");
+						}
+						return false; // waiting for query literal binding
+					}
+					if (!initialize()) {
+						return false; // defensive safeguard
+					}
 					initializedE = true;
 				}
 				if (hasSolution()) {
@@ -485,22 +514,14 @@ public class MongoResultIterator extends StatementIterator {
 
 	public StatementIterator getModelIterator(final long subject, final long predicate, final long object) {
 		setModelIteratorCreated(true);
+		return createStreamingModelIterator(subject, predicate, object);
+	}
+
+	private StatementIterator createStreamingModelIterator(final long subject, final long predicate, final long object) {
 		Resource sub = subject == 0 ? null : (Resource) entities.get(subject);
 		IRI p = predicate == 0 ? null : (IRI) entities.get(predicate);
 		Value o = object == 0 ? null : entities.get(object);
 		if (sub == null && batched) {
-			// for batched requests we provide a subject for the current entity
-			// but if that entity is already resolved as an object we should not do anything.
-			// The last condition is for inverse relations
-			// this section here will have nothing if the main entity iterator is not initialized
-			// this is the reason this is duplicated bellow in the model iterator
-			// this mainly covers the case
-			//    :entity [] .
-			// graph <> {?entity a ?type}.
-			// if this is written as
-			//    :entity ?entity .
-			// graph <> {?entity a ?type}.
-			// everything will work as expected
 			sub = (Resource) entities.get(this.object);
 			if (sub != null && sub.equals(o)) {
 				sub = null;
@@ -509,32 +530,22 @@ public class MongoResultIterator extends StatementIterator {
 		Resource s = sub;
 		return new StatementIterator() {
 			Iterator<Statement> local = null;
-
-			@Override
-			public boolean next() {
+			@Override public boolean next() {
 				if (currentRDF == null) {
 					if (!initialized && !initializedByEntityIterator) {
-						if (!isQuerySet()) {
-							return false;
-						}
 						initializedByEntityIterator = true;
 						if (initialize()) {
 							advance();
 						} else {
-							// no solutions were found or could not connect
 							return false;
 						}
+					} else if (hasSolution()) {
+						advance();
 					} else {
-						if (hasSolution()) {
-							advance();
-						} else {
-							// no more solutions
-							return false;
-						}
+						return false;
 					}
 				}
 				if (local == null) {
-					// see the comment above
 					Resource localSub = s;
 					if (localSub == null && batched) {
 						localSub = (Resource) entities.get(MongoResultIterator.this.object);
@@ -542,43 +553,33 @@ public class MongoResultIterator extends StatementIterator {
 							localSub = null;
 						}
 					}
-					local = currentRDF.filter(localSub, p, o).iterator();
+					Collection<Statement> all = currentRDF.filter(localSub, p, o);
+					local = all.iterator();
 				}
-				boolean has = local.hasNext();
-//				if (!has && hasSolution()) {
-//					advance();
-//					local = currentRDF.filter(s, p, o).iterator();
-//					has = local.hasNext();
-//				}
-				if (has) {
-					Statement st = local.next();
-					this.subject = entities.resolve(st.getSubject());
-					if (this.subject == 0) {
-						this.subject = entities.put(st.getSubject(), Scope.REQUEST);
-					}
-					this.predicate = entities.resolve(st.getPredicate());
-					if (this.predicate == 0) {
-						this.predicate = entities.put(st.getPredicate(), Scope.REQUEST);
-					}
-					this.object = entities.resolve(st.getObject());
-					if (this.object == 0) {
-						this.object = entities.put(st.getObject(), Scope.REQUEST);
-					}
-					// Set the context to the iterator's graph ID to respect mongodb:graph directive
-					this.context = MongoResultIterator.this.graphId;
-				}
-				return has;
+				if (!local.hasNext()) return false;
+				Statement st = local.next();
+				this.subject = resolveOrPut(st.getSubject());
+				this.predicate = resolveOrPut(st.getPredicate());
+				this.object = resolveOrPut(st.getObject());
+				this.context = MongoResultIterator.this.graphId;
+				return true;
 			}
-
-			@Override
-			public void close() {
+			private long resolveOrPut(Value v) {
+				long id = entities.resolve(v);
+				if (id == 0) id = entities.put(v, Scope.REQUEST);
+				return id;
 			}
+			@Override public void close() {}
 		};
 	}
+
 
 	public void setAggregation(List<Document> aggregation) {
 		this.aggregation = aggregation;
 		closeable &= aggregation != null;
+		if (pendingInitialization && !initialized && aggregation != null) {
+			initialize();
+		}
 	}
 
 	public void setGraphId(long graphId) {

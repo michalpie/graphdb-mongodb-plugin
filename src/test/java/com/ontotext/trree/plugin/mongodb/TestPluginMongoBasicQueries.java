@@ -84,6 +84,27 @@ public class TestPluginMongoBasicQueries extends AbstractMongoBasicTest {
 	}
 
 	@Test
+	public void testGetResultsFromDocumentById_withBind3() throws Exception {
+		query = "PREFIX : <http://www.ontotext.com/connectors/mongodb#>\r\n" +
+						"PREFIX inst: <http://www.ontotext.com/connectors/mongodb/instance#>\r\n" +
+						"select ?s ?o {\n"
+						+ "BIND(\"{'@id' : 'bbcc:##ID###id'}\" as ?queryPattern)."
+						+ "BIND(REPLACE(?queryPattern, '##ID##', '1646461') as ?query)."
+						+ "\t?search a inst:spb100 ;\n"
+						+ "\t:find	?query;"
+						+ "\t:project '{ \"@context\": 1, \"cwork:about\": 1, \"@type\": 1, \"@id\" : 1, \"@graph\" : 1 }' ;"
+						+ "\t:entity ?entity .\n"
+						+ "\tgraph inst:spb100 {\n"
+						+ "\t\t?s <http://www.bbc.co.uk/ontologies/creativework/about> ?o .\n"
+						+ "\t\tBIND((?s = <http://www.bbc.co.uk/things/1646461#id>) as ?eq)"
+						+ "\t}\n"
+						+ "}";
+
+		verifyResult("testGetResultsFromDocumentById", false);
+	}
+
+
+	@Test
 	public void testAggregation() throws Exception {
 		query = "PREFIX : <http://www.ontotext.com/connectors/mongodb#>\r\n"
 	            + "PREFIX inst: <http://www.ontotext.com/connectors/mongodb/instance#>\r\n"

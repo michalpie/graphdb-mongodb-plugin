@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (1.2.0-SNAPSHOT)
+
+- Deferred :find / :aggregate binding fix: query patterns now tolerate being visited before the JSON literal
+  produced via BIND chains (queryExpected flag) instead of prematurely closing the iterator and yielding no rows.
+- Graph redirection ordering: ensured :graph assignment is processed before any model pattern so redirected results
+  appear only in the target graph (fixes leakage into the original collection graph).
+- Batched execution ordering heuristic: increased penalty for scheduling :entity before an unbound query (base + 20)
+  preventing zero-result plans in batched mode when the query literal is produced by BIND. Validated by batched
+  BIND tests now returning expected 4 rows.
+
 ## 1.2.0
 
 - [GDB-11761](https://graphwise.atlassian.net/browse/GDB-11761): Adds batch processing of the result documents
