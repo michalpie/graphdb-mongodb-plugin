@@ -215,12 +215,37 @@ public class MongoDBPlugin extends PluginBase implements Preprocessor, PatternIn
 			// before any model triples are emitted, ensuring isolation (no leakage into original graph).
 			return base + 0.09;
 		}
+		if (hasPendingQueryForPattern(ctx, subject, context)) {
+			// Delay evaluation of model patterns until the corresponding :find/:aggregate literal
+			// is bound. Otherwise the iterator may attempt to initialise prematurely and the
+			// engine will conclude that the branch is empty (regression guarded by
+			// TestPluginMongoLateBindEquality).
+			return base + 50.0;
+		}
 		// model patterns inside a known context
 		if (ctx != null && ctx.iters != null && ctx.getContexts().contains(context)) return base + 0.10;
 		// Default (likely model pattern outside known context yet). We still want these to
 		// execute AFTER the :graph predicate so that any redirection has already been
 		// applied to the iterator. Give them a slightly higher cost than graph.
 		return base + 0.11; // model pattern default cost (ensures graph processed first)
+	}
+
+	private boolean hasPendingQueryForPattern(ContextImpl ctx, long subject, long context) {
+		if (ctx == null || ctx.iters == null || ctx.iters.isEmpty()) {
+			return false;
+		}
+		for (MongoResultIterator iterator : ctx.iters) {
+			if (iterator == null || iterator.isClosed() || iterator.isQuerySet() || !iterator.isQueryExpected()) {
+				continue;
+			}
+			boolean matchesContext = context != 0
+					&& (iterator.getGraphId() == context || iterator.getQueryIdentifier() == context);
+			boolean matchesSubject = subject != 0 && iterator.getSearchSubject() == subject;
+			if (matchesContext || matchesSubject) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	@Override
