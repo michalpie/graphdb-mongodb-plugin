@@ -100,6 +100,9 @@
       "cwork:title": "Apollo Records (1944) offence sexing mortgager's disambiguation undertaking femora niche kinking aggression comer.",
       "next": {
         "@id": "http://www.bbc.co.uk/things/1646461#id"
+      },
+      "referer": {
+        "@id": "http://www.bbc.co.uk/external/4"
       }
     }
   ],
@@ -143,6 +146,7 @@
     "bbcd": "http://www.bbc.co.uk/document/",
     "bbcc": "http://www.bbc.co.uk/context/",
     "bbct": "http://www.bbc.co.uk/thumbnail/",
-    "next": { "@reverse": "bbc:previous" }
+    "next": { "@reverse": "bbc:previous" },
+    "referer": { "@reverse": "bbc:refers" }
   }
 }

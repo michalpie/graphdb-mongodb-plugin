@@ -47,7 +47,10 @@
     "cwork:thumbnail" : {
       "@id" : "bbct:544611179"
     },
-    "cwork:title" : "Dimitrios Gounaris potable roaches arbitrated pica blaspheming hovels stiffly dazzle hirelings appendixes."
+    "cwork:title" : "Dimitrios Gounaris potable roaches arbitrated pica blaspheming hovels stiffly dazzle hirelings appendixes.",
+    "referer": {
+      "@id": "http://www.bbc.co.uk/external/5"
+    }
   } ],
   "id" : "bbcc:1646461#id",
   "@context" : {
@@ -89,6 +92,7 @@
     "bbcd" : "http://www.bbc.co.uk/document/",
     "bbcc" : "http://www.bbc.co.uk/context/",
     "bbct" : "http://www.bbc.co.uk/thumbnail/",
-    "next": { "@reverse": "bbc:previous" }
+    "next": { "@reverse": "bbc:previous" },
+    "referer": { "@reverse": "bbc:refers" }
   }
 }

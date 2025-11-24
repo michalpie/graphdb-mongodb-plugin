@@ -84,6 +84,9 @@
       "cwork:title": "Clay Telecom dreams disqualifications drinkable misguides semiprivate situates revolved vindictiveness colonials pinup.",
       "next": {
         "@id": "http://www.bbc.co.uk/things/1646449#id"
+      },
+      "referer": {
+        "@id": "http://www.bbc.co.uk/external/1"
       }
     }
   ],
@@ -127,6 +130,7 @@
     "bbcd": "http://www.bbc.co.uk/document/",
     "bbcc": "http://www.bbc.co.uk/context/",
     "bbct": "http://www.bbc.co.uk/thumbnail/",
-    "next": { "@reverse": "bbc:previous" }
+    "next": { "@reverse": "bbc:previous" },
+    "referer": { "@reverse": "bbc:refers" }
   }
 }

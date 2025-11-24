@@ -40,6 +40,10 @@ public class BatchDocumentStore {
 		return documentIds.size();
 	}
 
+	public boolean contains(long id) {
+		return uniqueDocumentIds.contains(id);
+	}
+
 	LongIterator getIterator() {
 		return documentIds.longIterator();
 	}

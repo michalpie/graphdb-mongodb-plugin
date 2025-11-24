@@ -541,12 +541,9 @@ public class MongoResultIterator extends StatementIterator {
 					if (local == null) {
 						// see the comment above
 						Resource localSub = s;
-						Value currentEntity = null;
-						if (localSub == null && batched) {
-							currentEntity = entities.get(MongoResultIterator.this.object);
-							if (currentEntity instanceof Resource res) {
-								localSub = res.equals(o) ? null : res;
-							}
+						Value currentEntity = entities.get(MongoResultIterator.this.object);
+						if (localSub == null && batched && currentEntity instanceof Resource res) {
+							localSub = res.equals(o) ? null : res;
 						}
 						local = currentRDF.filter(localSub, p, o).iterator();
 						// If we are driven by an entity iterator and looked for statements
@@ -554,7 +551,17 @@ public class MongoResultIterator extends StatementIterator {
 						// direction where the entity is an object (e.g. reverse properties).
 						if (entityIteratorCreated && o == null && localSub != null && !local.hasNext()
 								&& currentEntity != null) {
-							local = currentRDF.filter(null, p, currentEntity).iterator();
+							// Avoid duplicating statements that will surface when their subject is processed
+							// as an entity in the current batch.
+							List<Statement> inverseStatements = new ArrayList<>();
+							for (Statement st : currentRDF.filter(null, p, currentEntity)) {
+								long subjId = entities.resolve(st.getSubject());
+								if (batchDocumentStore != null && subjId != 0 && batchDocumentStore.contains(subjId)) {
+									continue;
+								}
+								inverseStatements.add(st);
+							}
+							local = inverseStatements.iterator();
 						}
 					}
 					if (local.hasNext()) {

@@ -93,6 +93,9 @@
       "cwork:title": "Harris Teeter paves stylist murkiest hens pulpy registering debate sensation practice singers.",
       "next": {
         "@id": "http://www.bbc.co.uk/things/1646453#id"
+      },
+      "referer": {
+        "@id": "http://www.bbc.co.uk/external/2"
       }
     }
   ],
@@ -136,6 +139,7 @@
     "bbcd": "http://www.bbc.co.uk/document/",
     "bbcc": "http://www.bbc.co.uk/context/",
     "bbct": "http://www.bbc.co.uk/thumbnail/",
-    "next": { "@reverse": "bbc:previous" }
+    "next": { "@reverse": "bbc:previous" },
+    "referer": { "@reverse": "bbc:refers" }
   }
 }
